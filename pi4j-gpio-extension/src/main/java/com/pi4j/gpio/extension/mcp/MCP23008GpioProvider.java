@@ -4,7 +4,6 @@ import java.io.IOException;
 import java.util.concurrent.ScheduledExecutorService;
 
 import com.pi4j.io.gpio.GpioProvider;
-import com.pi4j.io.gpio.GpioProviderBase;
 import com.pi4j.io.gpio.GpioProviderPinCache;
 import com.pi4j.io.gpio.Pin;
 import com.pi4j.io.gpio.PinMode;
@@ -64,7 +63,7 @@ import com.pi4j.io.i2c.I2CFactory.UnsupportedBusNumberException;
  *
  */
 
-public class MCP23008GpioProvider extends GpioProviderBase implements GpioProvider {
+public class MCP23008GpioProvider extends ExtensionProviderBase implements GpioProvider {
 
     public static final String NAME = "com.pi4j.gpio.extension.mcp.MCP23008GpioProvider";
     public static final String DESCRIPTION = "MCP23008 GPIO Provider";
@@ -85,7 +84,6 @@ public class MCP23008GpioProvider extends GpioProviderBase implements GpioProvid
     private boolean i2cBusOwner = false;
     private I2CBus bus;
     private I2CDevice device;
-    private GpioStateMonitor monitor = null;
 
     public MCP23008GpioProvider(int busNumber, int address) throws UnsupportedBusNumberException, IOException {
         this(busNumber, address, null, 50, RefreshType.RefreshDelay);
@@ -149,7 +147,9 @@ public class MCP23008GpioProvider extends GpioProviderBase implements GpioProvid
 
         // set all default pin pull up resistors
         device.write(REGISTER_GPPU, (byte) currentPullup);
-        setMonitior(new StateMonitor(device));
+
+        // create and set the monitor
+        setMonitior(new StateMonitor(device, executorService, refreshDelay, refreshType));
     }
 
     @Override
@@ -306,13 +306,15 @@ public class MCP23008GpioProvider extends GpioProviderBase implements GpioProvid
      * This class/thread is used to to actively monitor for GPIO interrupts
      *
      * @author Robert Savage
+     * @author Günter Goerlich
      *
      */
     private class StateMonitor extends GpioStateMonitor {
         private I2CDevice device;
 
-        public StateMonitor(I2CDevice device) {
-            super();
+        public StateMonitor(I2CDevice device, ScheduledExecutorService executorService, int refreshDelay,
+                RefreshType refreshType) {
+            super(executorService, refreshDelay, refreshType);
             this.device = device;
         }
 
