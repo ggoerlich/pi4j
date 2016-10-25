@@ -1,4 +1,4 @@
-package com.pi4j.gpio.extension.mcp;
+package com.pi4j.gpio.extension;
 
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.ScheduledFuture;

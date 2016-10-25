@@ -3,6 +3,7 @@ package com.pi4j.gpio.extension.mcp;
 import java.io.IOException;
 import java.util.concurrent.ScheduledExecutorService;
 
+import com.pi4j.gpio.extension.ExtensionProviderBase;
 import com.pi4j.io.gpio.GpioProvider;
 import com.pi4j.io.gpio.GpioProviderPinCache;
 import com.pi4j.io.gpio.Pin;
