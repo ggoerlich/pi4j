@@ -1,5 +1,9 @@
 package com.pi4j.gpio.extension.base;
 
+import java.io.IOException;
+import java.util.Arrays;
+import java.util.concurrent.ScheduledExecutorService;
+
 /*
  * #%L
  * **********************************************************************
@@ -28,12 +32,9 @@ package com.pi4j.gpio.extension.base;
  * <http://www.gnu.org/licenses/lgpl-3.0.html>.
  * #L%
  */
-
-import com.pi4j.io.gpio.*;
-import com.pi4j.io.gpio.event.PinAnalogValueChangeEvent;
-import com.pi4j.io.gpio.event.PinListener;
-
-import java.io.IOException;
+import com.pi4j.io.gpio.GpioPin;
+import com.pi4j.io.gpio.GpioPinAnalogInput;
+import com.pi4j.io.gpio.Pin;
 
 /**
  *
@@ -44,7 +45,7 @@ import java.io.IOException;
  *
  * @author Robert Savage
  */
-public abstract class AdcGpioProviderBase extends GpioProviderBase implements AdcGpioProvider {
+public abstract class AdcGpioProviderBase extends ExtensionProviderBase implements AdcGpioProvider {
 
     // background ADC analog input value monitor
     protected ADCMonitor monitor = null;
@@ -52,15 +53,11 @@ public abstract class AdcGpioProviderBase extends GpioProviderBase implements Ad
     // the delay time required between analog input conversions for each input
     protected int conversionDelay = 0;
 
-    // this value defines the sleep time between value reads by the event monitoring thread (in milliseconds)
-    protected int monitorInterval = 100;
-
     // used to store the pins used in this implementation
     protected Pin[] allPins = null;
 
     // the threshold used to determine if a significant value warrants an event to be raised
     protected double[] threshold = null;
-
 
     // ------------------------------------------------------------------------------------------
     // DEFAULT CONSTRUCTOR
@@ -71,12 +68,13 @@ public abstract class AdcGpioProviderBase extends GpioProviderBase implements Ad
      *
      * @param pins the collection of all GPIO pins used with this ADC provider implementation
      */
-    public AdcGpioProviderBase(Pin[] pins){
-        this.allPins = pins;                       // initialize pins collection
-        this.threshold = new double[pins.length];  // initialize pin thresholds collection
+    public AdcGpioProviderBase(Pin[] pins) {
+        this.allPins = pins; // initialize pins collection
+        this.threshold = new double[pins.length]; // initialize pin thresholds collection
 
         // set default thresholds
-        for(double item : threshold) { item = DEFAULT_THRESHOLD; }
+        Arrays.fill(threshold, DEFAULT_THRESHOLD);
+
     }
 
     // ------------------------------------------------------------------------------------------
@@ -87,7 +85,7 @@ public abstract class AdcGpioProviderBase extends GpioProviderBase implements Ad
      * Get the requested analog input pin's conversion value.
      *
      * If you have the background monitoring thread enabled, then
-     * this function will return the last cached value.  If you have the
+     * this function will return the last cached value. If you have the
      * background monitoring thread disabled, then this function will
      * will perform an immediate data acquisition directly to the ADC chip
      * to get the requested pin's input conversion value. (via getImmediateValue())
@@ -95,11 +93,11 @@ public abstract class AdcGpioProviderBase extends GpioProviderBase implements Ad
      * @param pin to get conversion values for
      * @return analog input pin conversion value (10-bit: 0 to 1023)
      */
-	@Override
-	public double getValue(Pin pin) {
+    @Override
+    public double getValue(Pin pin) {
         // if we are not actively monitoring the ADC input values,
         // then interrogate the ADC chip and return the acquired input conversion value
-        if(monitor == null) {
+        if (!isMonitorRunning()) {
             // do not return, only let parent handle whether this pin is OK
             super.getValue(pin);
             try {
@@ -107,8 +105,7 @@ public abstract class AdcGpioProviderBase extends GpioProviderBase implements Ad
             } catch (IOException e) {
                 return INVALID_VALUE;
             }
-        }
-        else{
+        } else {
             // if we are actively monitoring the ADC input values,
             // the simply return the last cached input value
             return super.getValue(pin);
@@ -120,9 +117,10 @@ public abstract class AdcGpioProviderBase extends GpioProviderBase implements Ad
      *
      * @return percentage value between 0 and 100.
      */
-    public float getPercentValue(Pin pin){
+    @Override
+    public float getPercentValue(Pin pin) {
         double value = getValue(pin);
-        if(value > INVALID_VALUE) {
+        if (value > INVALID_VALUE) {
             return (float) (value / (getMaxSupportedValue() - getMinSupportedValue())) * 100f;
         }
         return INVALID_VALUE;
@@ -133,7 +131,8 @@ public abstract class AdcGpioProviderBase extends GpioProviderBase implements Ad
      *
      * @return percentage value between 0 and 100.
      */
-    public float getPercentValue(GpioPinAnalogInput pin){
+    @Override
+    public float getPercentValue(GpioPinAnalogInput pin) {
         return getPercentValue(pin.getPin());
     }
 
@@ -146,34 +145,8 @@ public abstract class AdcGpioProviderBase extends GpioProviderBase implements Ad
      * @throws IOException
      */
     @Override
-    public double getImmediateValue(GpioPinAnalogInput pin) throws IOException{
+    public double getImmediateValue(GpioPinAnalogInput pin) throws IOException {
         return getImmediateValue(pin.getPin());
-    }
-
-    /**
-     * This method is used by the framework to shutdown the
-     * background monitoring thread if needed when the program exits.
-     */
-    @Override
-    public void shutdown() {
-
-        // prevent reentrant invocation
-        if(isShutdown())
-            return;
-
-        // perform shutdown login in base
-        super.shutdown();
-
-        try {
-            // if a monitor is running, then shut it down now
-            if (monitor != null) {
-                // shutdown monitoring thread
-                monitor.shutdown();
-                monitor = null;
-            }
-        } catch (Exception e) {
-            throw new RuntimeException(e);
-        }
     }
 
     /**
@@ -181,7 +154,7 @@ public abstract class AdcGpioProviderBase extends GpioProviderBase implements Ad
      *
      * The event threshold value determines how much change in the
      * analog input pin's conversion value must occur before the
-     * framework issues an analog input pin change event.  A threshold
+     * framework issues an analog input pin change event. A threshold
      * is necessary to prevent a significant number of analog input
      * change events from getting propagated and dispatched for input
      * values that may have an expected range of drift.
@@ -192,7 +165,7 @@ public abstract class AdcGpioProviderBase extends GpioProviderBase implements Ad
      * @return event threshold value for requested analog input pin
      */
     @Override
-    public double getEventThreshold(Pin pin){
+    public double getEventThreshold(Pin pin) {
         return threshold[pin.getAddress()];
     }
 
@@ -201,7 +174,7 @@ public abstract class AdcGpioProviderBase extends GpioProviderBase implements Ad
      *
      * The event threshold value determines how much change in the
      * analog input pin's conversion value must occur before the
-     * framework issues an analog input pin change event.  A threshold
+     * framework issues an analog input pin change event. A threshold
      * is necessary to prevent a significant number of analog input
      * change events from getting propagated and dispatched for input
      * values that may have an expected range of drift.
@@ -212,7 +185,7 @@ public abstract class AdcGpioProviderBase extends GpioProviderBase implements Ad
      * @return event threshold value for requested analog input pin
      */
     @Override
-    public double getEventThreshold(GpioPinAnalogInput pin){
+    public double getEventThreshold(GpioPinAnalogInput pin) {
         return getEventThreshold(pin.getPin());
     }
 
@@ -221,7 +194,7 @@ public abstract class AdcGpioProviderBase extends GpioProviderBase implements Ad
      *
      * The event threshold value determines how much change in the
      * analog input pin's conversion value must occur before the
-     * framework issues an analog input pin change event.  A threshold
+     * framework issues an analog input pin change event. A threshold
      * is necessary to prevent a significant number of analog input
      * change events from getting propagated and dispatched for input
      * values that may have an expected range of drift.
@@ -232,8 +205,8 @@ public abstract class AdcGpioProviderBase extends GpioProviderBase implements Ad
      * @param pin analog input pin (vararg, one or more inputs can be defined.)
      */
     @Override
-    public void setEventThreshold(double threshold, Pin...pin){
-        for(Pin p : pin){
+    public void setEventThreshold(double threshold, Pin... pin) {
+        for (Pin p : pin) {
             this.threshold[p.getAddress()] = threshold;
         }
     }
@@ -243,7 +216,7 @@ public abstract class AdcGpioProviderBase extends GpioProviderBase implements Ad
      *
      * The event threshold value determines how much change in the
      * analog input pin's conversion value must occur before the
-     * framework issues an analog input pin change event.  A threshold
+     * framework issues an analog input pin change event. A threshold
      * is necessary to prevent a significant number of analog input
      * change events from getting propagated and dispatched for input
      * values that may have an expected range of drift.
@@ -254,40 +227,10 @@ public abstract class AdcGpioProviderBase extends GpioProviderBase implements Ad
      * @param pin analog input pin (vararg, one or more inputs can be defined.)
      */
     @Override
-    public void setEventThreshold(double threshold, GpioPinAnalogInput...pin){
-        for(GpioPin p : pin){
+    public void setEventThreshold(double threshold, GpioPinAnalogInput... pin) {
+        for (GpioPin p : pin) {
             setEventThreshold(threshold, p.getPin());
         }
-    }
-
-    /**
-     * Get the background monitoring thread's rate of data acquisition. (in milliseconds)
-     *
-     * The default interval is 100 milliseconds.
-     * The minimum supported interval is 50 milliseconds.
-     *
-     * @return monitoring interval in milliseconds
-     */
-    @Override
-    public int getMonitorInterval(){
-        return monitorInterval;
-    }
-
-    /**
-     * Change the background monitoring thread's rate of data acquisition. (in milliseconds)
-     *
-     * The default interval is 100 milliseconds.
-     * The minimum supported interval is 50 milliseconds.
-     *
-     * @param monitorInterval
-     */
-    @Override
-    public void setMonitorInterval(int monitorInterval){
-        this.monitorInterval = monitorInterval;
-
-        // enforce a minimum interval threshold.
-        if(monitorInterval < MIN_MONITOR_INTERVAL)
-            monitorInterval = DEFAULT_MONITOR_INTERVAL;
     }
 
     /**
@@ -297,35 +240,7 @@ public abstract class AdcGpioProviderBase extends GpioProviderBase implements Ad
      */
     @Override
     public boolean getMonitorEnabled() {
-        return (monitor != null);
-    }
-
-    /**
-     * Set the background monitoring thread's enabled state.
-     *
-     * @param enabled monitoring enabled or disabled state
-     */
-    @Override
-    public void setMonitorEnabled(boolean enabled) {
-        if(enabled) {
-            // create and start background monitor
-            if (monitor == null) {
-                monitor = new AdcGpioProviderBase.ADCMonitor();
-                monitor.start();
-            }
-        }
-        else{
-            try {
-                // if a monitor is running, then shut it down now
-                if (monitor != null) {
-                    // shutdown monitoring thread
-                    monitor.shutdown();
-                    monitor = null;
-                }
-            } catch (Exception e) {
-                throw new RuntimeException(e);
-            }
-        }
+        return isMonitorRunning();
     }
 
     /**
@@ -339,6 +254,19 @@ public abstract class AdcGpioProviderBase extends GpioProviderBase implements Ad
     @Override
     public abstract double getImmediateValue(Pin pin) throws IOException;
 
+    /*
+     * (non-Javadoc)
+     *
+     * @see
+     * com.pi4j.gpio.extension.base.ExtensionProviderBase#createMonitor(java.util.concurrent.ScheduledExecutorService,
+     * int, com.pi4j.gpio.extension.base.ExtensionProviderBase.RefreshType)
+     */
+    @Override
+    public ExtensionMonitor createMonitor(ScheduledExecutorService scheduledExecutorService, int refresh,
+            MonitorIntervalType refreshType) {
+
+        return new ADCMonitor(scheduledExecutorService, refresh, refreshType);
+    }
 
     /**
      * This class/thread is used to to actively monitor ADC input changes
@@ -346,80 +274,61 @@ public abstract class AdcGpioProviderBase extends GpioProviderBase implements Ad
      * @author Robert Savage
      *
      */
-    private class ADCMonitor extends Thread {
-
-        private boolean shuttingDown = false;
-
-        public void shutdown() {
-            shuttingDown = true;
+    private class ADCMonitor extends ExtensionMonitor {
+        protected ADCMonitor(ScheduledExecutorService scheduledExecutorService, int refresh,
+                MonitorIntervalType refreshType) {
+            super(scheduledExecutorService, refresh, refreshType);
         }
 
+        public ADCMonitor(int refresh, MonitorIntervalType refreshType) {
+            super(refresh, refreshType);
+        }
+
+        @Override
         public void run() {
-            while (!shuttingDown) {
-                try {
-                    // determine if there is a pin state difference
-                    if(allPins != null && allPins.length > 0){
-                        for (Pin pin : allPins) {
 
-                            try{
-                                // get current cached value
-                                double oldValue = getPinCache(pin).getAnalogValue();
+            try {
+                // determine if there is a pin state difference
+                if (allPins != null && allPins.length > 0) {
+                    for (Pin pin : allPins) {
 
-                                // get actual value from ADC chip
-                                double newValue = getImmediateValue(pin);
+                        try {
+                            // get current cached value
+                            double oldValue = getPinCache(pin).getAnalogValue();
 
-                                // no need to continue if we received an invalid value from the ADC chip.
-                                if(newValue <= INVALID_VALUE){ break; }
+                            // get actual value from ADC chip
+                            double newValue = getImmediateValue(pin);
 
-                                // check to see if the pin value exceeds the event threshold
-                                if(threshold == null || Math.abs(oldValue - newValue) > threshold[pin.getAddress()]){
-
-                                    // cache new analog input conversion value
-                                    getPinCache(pin).setAnalogValue(newValue);
-
-                                    // only dispatch events for analog input pins
-                                    if (getMode(pin) == PinMode.ANALOG_INPUT) {
-                                        dispatchPinChangeEvent(pin.getAddress(), newValue);
-                                    }
-                                }
-
-                                // Wait for the conversion to complete
-                                try{
-                                    if(conversionDelay > 0){
-                                        Thread.sleep(conversionDelay);
-                                    }
-                                }
-                                catch (InterruptedException e) {
-                                    e.printStackTrace();
-                                }
+                            // no need to continue if we received an invalid value from the ADC chip.
+                            if (newValue <= INVALID_VALUE) {
+                                break;
                             }
-                            catch(IOException ex){
-                                ex.printStackTrace();
+
+                            // check to see if the pin value exceeds the event threshold
+                            if (threshold == null || Math.abs(oldValue - newValue) > threshold[pin.getAddress()]) {
+
+                                // cache new analog input conversion value
+                                setValue(pin, newValue);
                             }
+
+                            // Wait for the conversion to complete
+                            try {
+                                if (conversionDelay > 0) {
+                                    Thread.sleep(conversionDelay);
+                                }
+                            } catch (InterruptedException e) {
+
+                            }
+                        } catch (IOException ex) {
+                            ex.printStackTrace();
                         }
                     }
-
-                    // ... lets take a short breather ...
-                    Thread.currentThread();
-                    Thread.sleep(monitorInterval);
-                } catch (Exception ex) {
-                    ex.printStackTrace();
                 }
+
+            } catch (Exception ex) {
+                ex.printStackTrace();
             }
         }
 
-        private void dispatchPinChangeEvent(int pinAddress, double value) {
-            // iterate over the pin listeners map
-            for (Pin pin : listeners.keySet()) {
-                // dispatch this event to the listener
-                // if a matching pin address is found
-                if (pin.getAddress() == pinAddress) {
-                    // dispatch this event to all listener handlers
-                    for (PinListener listener : listeners.get(pin)) {
-                        listener.handlePinEvent(new PinAnalogValueChangeEvent(this, pin, value));
-                    }
-                }
-            }
-        }
     }
 }

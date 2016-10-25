@@ -1,15 +1,19 @@
 package com.pi4j.gpio.extension.mcp;
 
-import com.pi4j.io.gpio.*;
-import com.pi4j.io.gpio.event.PinDigitalStateChangeEvent;
-import com.pi4j.io.gpio.event.PinListener;
+import java.io.IOException;
+import java.util.concurrent.ScheduledExecutorService;
+
+import com.pi4j.gpio.extension.base.ExtensionProviderBase;
+import com.pi4j.io.gpio.GpioProvider;
+import com.pi4j.io.gpio.Pin;
+import com.pi4j.io.gpio.PinMode;
+import com.pi4j.io.gpio.PinPullResistance;
+import com.pi4j.io.gpio.PinState;
 import com.pi4j.io.gpio.exception.InvalidPinException;
 import com.pi4j.io.gpio.exception.UnsupportedPinPullResistanceException;
 import com.pi4j.io.spi.SpiChannel;
 import com.pi4j.io.spi.SpiDevice;
 import com.pi4j.io.spi.SpiFactory;
-
-import java.io.IOException;
 
 /*
  * #%L
@@ -55,12 +59,12 @@ import java.io.IOException;
  * @author Robert Savage
  *
  */
-public class MCP23S17GpioProvider extends GpioProviderBase implements GpioProvider {
+public class MCP23S17GpioProvider extends ExtensionProviderBase implements GpioProvider {
 
     public static final String NAME = "com.pi4j.gpio.extension.mcp.MCP23S17GpioProvider";
     public static final String DESCRIPTION = "MCP23S17 GPIO Provider";
 
-    // SPI Address Register  0b[0 1 0 0 A2 A1 A0 x]
+    // SPI Address Register 0b[0 1 0 0 A2 A1 A0 x]
     public static final byte ADDRESS_0 = 0b01000000; // 0x40 [0100 0000] [A0 = 0 | A1 = 0 | A2 = 0]
     public static final byte ADDRESS_1 = 0b01000010; // 0x42 [0100 0010] [A0 = 1 | A1 = 0 | A2 = 0]
     public static final byte ADDRESS_2 = 0b01000100; // 0x44 [0100 0100] [A0 = 0 | A1 = 1 | A2 = 0]
@@ -93,14 +97,14 @@ public class MCP23S17GpioProvider extends GpioProviderBase implements GpioProvid
     private static final int GPIO_A_OFFSET = 0;
     private static final int GPIO_B_OFFSET = 1000;
 
-    private static final byte IOCON_UNUSED    = (byte)0x01;
-    private static final byte IOCON_INTPOL    = (byte)0x02;
-    private static final byte IOCON_ODR       = (byte)0x04;
-    private static final byte IOCON_HAEN      = (byte)0x08;
-    private static final byte IOCON_DISSLW    = (byte)0x10;
-    private static final byte IOCON_SEQOP     = (byte)0x20;
-    private static final byte IOCON_MIRROR    = (byte)0x40;
-    private static final byte IOCON_BANK_MODE = (byte)0x80;
+    private static final byte IOCON_UNUSED = (byte) 0x01;
+    private static final byte IOCON_INTPOL = (byte) 0x02;
+    private static final byte IOCON_ODR = (byte) 0x04;
+    private static final byte IOCON_HAEN = (byte) 0x08;
+    private static final byte IOCON_DISSLW = (byte) 0x10;
+    private static final byte IOCON_SEQOP = (byte) 0x20;
+    private static final byte IOCON_MIRROR = (byte) 0x40;
+    private static final byte IOCON_BANK_MODE = (byte) 0x80;
 
     private int currentStatesA = 0;
     private int currentStatesB = 0;
@@ -114,8 +118,8 @@ public class MCP23S17GpioProvider extends GpioProviderBase implements GpioProvid
     private final SpiDevice spi;
 
     public static final int SPI_SPEED = 1000000;
-    public static final byte WRITE_FLAG = 0b00000000;    // 0x00
-    public static final byte READ_FLAG  = 0b00000001;    // 0x01
+    public static final byte WRITE_FLAG = 0b00000000; // 0x00
+    public static final byte READ_FLAG = 0b00000001; // 0x01
 
     public MCP23S17GpioProvider(byte spiAddress, int spiChannel) throws IOException {
         this(spiAddress, spiChannel, SPI_SPEED);
@@ -134,30 +138,30 @@ public class MCP23S17GpioProvider extends GpioProviderBase implements GpioProvid
         // IOCON – I/O EXPANDER CONFIGURATION REGISTER
         //
         // bit 7 BANK: Controls how the registers are addressed
-        //     1 = The registers associated with each port are separated into different banks
-        //     0 = The registers are in the same bank (addresses are sequential)
+        // 1 = The registers associated with each port are separated into different banks
+        // 0 = The registers are in the same bank (addresses are sequential)
         // bit 6 MIRROR: INT Pins Mirror bit
-        //     1 = The INT pins are internally connected
-        //     0 = The INT pins are not connected. INTA is associated with PortA and INTB is associated with PortB
+        // 1 = The INT pins are internally connected
+        // 0 = The INT pins are not connected. INTA is associated with PortA and INTB is associated with PortB
         // bit 5 SEQOP: Sequential Operation mode bit.
-        //     1 = Sequential operation disabled, address pointer does not increment.
-        //     0 = Sequential operation enabled, address pointer increments.
+        // 1 = Sequential operation disabled, address pointer does not increment.
+        // 0 = Sequential operation enabled, address pointer increments.
         // bit 4 DISSLW: Slew Rate control bit for SDA output.
-        //     1 = Slew rate disabled.
-        //     0 = Slew rate enabled.
+        // 1 = Slew rate disabled.
+        // 0 = Slew rate enabled.
         // bit 3 HAEN: Hardware Address Enable bit (MCP23S17 only).
-        //     Address pins are always enabled on MCP23017.
-        //     1 = Enables the MCP23S17 address pins.
-        //     0 = Disables the MCP23S17 address pins.
+        // Address pins are always enabled on MCP23017.
+        // 1 = Enables the MCP23S17 address pins.
+        // 0 = Disables the MCP23S17 address pins.
         // bit 2 ODR: This bit configures the INT pin as an open-drain output.
-        //     1 = Open-drain output (overrides the INTPOL bit).
-        //     0 = Active driver output (INTPOL bit sets the polarity).
+        // 1 = Open-drain output (overrides the INTPOL bit).
+        // 0 = Active driver output (INTPOL bit sets the polarity).
         // bit 1 INTPOL: This bit sets the polarity of the INT output pin.
-        //     1 = Active-high.
-        //     0 = Active-low.
+        // 1 = Active-high.
+        // 0 = Active-low.
         // bit 0 Unimplemented: Read as ‘0’.
         //
-        this(spiAddress ,spiChannel ,spiSpeed, (byte) 0x00001000);
+        this(spiAddress, spiChannel, spiSpeed, (byte) 0x00001000);
     }
 
     public MCP23S17GpioProvider(byte spiAddress, int spiChannel, int spiSpeed, byte iocon) throws IOException {
@@ -175,33 +179,33 @@ public class MCP23S17GpioProvider extends GpioProviderBase implements GpioProvid
         // IOCON – I/O EXPANDER CONFIGURATION REGISTER
         //
         // bit 7 BANK: Controls how the registers are addressed
-        //     1 = The registers associated with each port are separated into different banks
-        //     0 = The registers are in the same bank (addresses are sequential)
+        // 1 = The registers associated with each port are separated into different banks
+        // 0 = The registers are in the same bank (addresses are sequential)
         // bit 6 MIRROR: INT Pins Mirror bit
-        //     1 = The INT pins are internally connected
-        //     0 = The INT pins are not connected. INTA is associated with PortA and INTB is associated with PortB
+        // 1 = The INT pins are internally connected
+        // 0 = The INT pins are not connected. INTA is associated with PortA and INTB is associated with PortB
         // bit 5 SEQOP: Sequential Operation mode bit.
-        //     1 = Sequential operation disabled, address pointer does not increment.
-        //     0 = Sequential operation enabled, address pointer increments.
+        // 1 = Sequential operation disabled, address pointer does not increment.
+        // 0 = Sequential operation enabled, address pointer increments.
         // bit 4 DISSLW: Slew Rate control bit for SDA output.
-        //     1 = Slew rate disabled.
-        //     0 = Slew rate enabled.
+        // 1 = Slew rate disabled.
+        // 0 = Slew rate enabled.
         // bit 3 HAEN: Hardware Address Enable bit (MCP23S17 only).
-        //     Address pins are always enabled on MCP23017.
-        //     1 = Enables the MCP23S17 address pins.
-        //     0 = Disables the MCP23S17 address pins.
+        // Address pins are always enabled on MCP23017.
+        // 1 = Enables the MCP23S17 address pins.
+        // 0 = Disables the MCP23S17 address pins.
         // bit 2 ODR: This bit configures the INT pin as an open-drain output.
-        //     1 = Open-drain output (overrides the INTPOL bit).
-        //     0 = Active driver output (INTPOL bit sets the polarity).
+        // 1 = Open-drain output (overrides the INTPOL bit).
+        // 0 = Active driver output (INTPOL bit sets the polarity).
         // bit 1 INTPOL: This bit sets the polarity of the INT output pin.
-        //     1 = Active-high.
-        //     0 = Active-low.
+        // 1 = Active-high.
+        // 0 = Active-low.
         // bit 0 Unimplemented: Read as ‘0’.
         //
 
         // write IO configuration
-        write(REGISTER_IOCON_A, (byte)(IOCON_SEQOP|IOCON_HAEN));  // enable hardware address
-        write(REGISTER_IOCON_B, (byte)(IOCON_SEQOP|IOCON_HAEN));  // enable hardware address
+        write(REGISTER_IOCON_A, (byte) (IOCON_SEQOP | IOCON_HAEN)); // enable hardware address
+        write(REGISTER_IOCON_B, (byte) (IOCON_SEQOP | IOCON_HAEN)); // enable hardware address
 
         // read initial GPIO pin states
         // (include the '& 0xFF' to ensure the bits in the unsigned byte are cast properly)
@@ -243,18 +247,20 @@ public class MCP23S17GpioProvider extends GpioProviderBase implements GpioProvid
         write(REGISTER_INTCON_B, (byte) 0x00);
 
         // reset/clear interrupt flags
-        if(currentDirectionA > 0)
+        if (currentDirectionA > 0) {
             read(REGISTER_INTCAP_A);
-        if(currentDirectionB > 0)
+        }
+        if (currentDirectionB > 0) {
             read(REGISTER_INTCAP_B);
+        }
     }
 
     protected synchronized void write(byte register, byte data) throws IOException {
         // create packet in data buffer
         byte packet[] = new byte[3];
-        packet[0] = (byte)(address|WRITE_FLAG);   // address byte
-        packet[1] = register;                     // register byte
-        packet[2] = data;                         // data byte
+        packet[0] = (byte) (address | WRITE_FLAG); // address byte
+        packet[1] = register; // register byte
+        packet[2] = data; // data byte
 
         // send data packet
         spi.write(packet);
@@ -263,9 +269,9 @@ public class MCP23S17GpioProvider extends GpioProviderBase implements GpioProvid
     protected synchronized int read(byte register) throws IOException {
         // create packet in data buffer
         byte packet[] = new byte[3];
-        packet[0] = (byte) (address | READ_FLAG);   // address byte
-        packet[1] = register;                    // register byte
-        packet[2] = 0b00000000;                  // data byte
+        packet[0] = (byte) (address | READ_FLAG); // address byte
+        packet[1] = register; // register byte
+        packet[2] = 0b00000000; // data byte
 
         byte[] result = spi.write(packet);
 
@@ -304,23 +310,6 @@ public class MCP23S17GpioProvider extends GpioProviderBase implements GpioProvid
             }
         } catch (IOException ex) {
             throw new RuntimeException(ex);
-        }
-
-        // if any pins are configured as input pins, then we need to start the interrupt monitoring
-        // thread
-        if (currentDirectionA > 0 || currentDirectionB > 0) {
-            // if the monitor has not been started, then start it now
-            if (monitor == null) {
-                // start monitoring thread
-                monitor = new GpioStateMonitor(this);
-                monitor.start();
-            }
-        } else {
-            // shutdown and destroy monitoring thread since there are no input pins configured
-            if (monitor != null) {
-                monitor.shutdown();
-                monitor = null;
-            }
         }
     }
 
@@ -413,46 +402,33 @@ public class MCP23S17GpioProvider extends GpioProviderBase implements GpioProvid
 
     @Override
     public PinState getState(Pin pin) {
-        // call super method to perform validation on pin
-        PinState result  = super.getState(pin);
 
-        // determine A or B port based on pin address
-        if (pin.getAddress() < GPIO_B_OFFSET) {
-            result = getStateA(pin); // get pin state
-        } else {
-            result = getStateB(pin); // get pin state
+        // If no monitor is running and this is a input pin we must fetch the current value
+        if (!isMonitorRunning() && getPinCache(pin).getMode() == PinMode.DIGITAL_INPUT) {
+            try {
+
+                // determine A or B port based on pin address
+                if (pin.getAddress() < GPIO_B_OFFSET) {
+                    currentStatesA = read(REGISTER_GPIO_A);
+                    setState(pin,
+                            (currentStatesA & (pin.getAddress() - GPIO_A_OFFSET)) != 0 ? PinState.HIGH : PinState.LOW); // get
+                                                                                                                        // pin
+                                                                                                                        // state
+                } else {
+                    currentStatesB = read(REGISTER_GPIO_B);
+                    setState(pin,
+                            (currentStatesB & (pin.getAddress() - GPIO_A_OFFSET)) != 0 ? PinState.HIGH : PinState.LOW); // get
+                                                                                                                        // pin
+                                                                                                                        // state
+                }
+            } catch (IOException e) {
+                e.printStackTrace();
+            }
+
         }
 
         // return pin state
-        return result;
-    }
-
-    private PinState getStateA(Pin pin){
-
-        // determine pin address
-        int pinAddress = pin.getAddress() - GPIO_A_OFFSET;
-
-        // determine pin state
-        PinState state = (currentStatesA & pinAddress) == pinAddress ? PinState.HIGH : PinState.LOW;
-
-        // cache state
-        getPinCache(pin).setState(state);
-
-        return state;
-    }
-
-    private PinState getStateB(Pin pin){
-
-        // determine pin address
-        int pinAddress = pin.getAddress() - GPIO_B_OFFSET;
-
-        // determine pin state
-        PinState state = (currentStatesB & pinAddress) == pinAddress ? PinState.HIGH : PinState.LOW;
-
-        // cache state
-        getPinCache(pin).setState(state);
-
-        return state;
+        return getState(pin);
     }
 
     @Override
@@ -515,170 +491,81 @@ public class MCP23S17GpioProvider extends GpioProviderBase implements GpioProvid
         return super.getPullResistance(pin);
     }
 
-
-    @Override
-    public void shutdown() {
-
-        // prevent reentrant invocation
-        if(isShutdown())
-            return;
-
-        // perform shutdown login in base
-        super.shutdown();
-
-        // if a monitor is running, then shut it down now
-        if (monitor != null) {
-            // shutdown monitoring thread
-            monitor.shutdown();
-            monitor = null;
-        }
-    }
-
-
     /**
-     * This class/thread is used to to actively monitor for GPIO interrupts
+     * This class is used to to actively monitor for GPIO interrupts
      *
      * @author Robert Savage
      *
      */
-    private class GpioStateMonitor extends Thread {
+    private class GpioStateMonitor extends ExtensionMonitor {
         private MCP23S17GpioProvider provider;
         private boolean shuttingDown = false;
 
-        public GpioStateMonitor(MCP23S17GpioProvider provider) {
+        public GpioStateMonitor(MCP23S17GpioProvider provider, ScheduledExecutorService scheduledExecutorService,
+                int interval, MonitorIntervalType intervalType) {
+            super(scheduledExecutorService, interval, intervalType);
             this.provider = provider;
         }
 
-        public void shutdown() {
-            shuttingDown = true;
-        }
-
+        @Override
         public void run() {
-            while (!shuttingDown) {
-                try {
-                    // only process for interrupts if a pin on port A is configured as an input pin
-                    if (currentDirectionA > 0) {
-                        // process interrupts for port A
-                        int pinInterruptA = provider.read(REGISTER_INTF_A);
 
-                        // validate that there is at least one interrupt active on port A
-                        if (pinInterruptA > 0) {
-                            // read the current pin states on port A
-                            int pinInterruptState = provider.read(REGISTER_GPIO_A);
+            try {
+                // only process for interrupts if a pin on port A is configured as an input pin
+                if (currentDirectionA > 0) {
+                    // process interrupts for port A
+                    int pinInterruptA = provider.read(REGISTER_INTF_A);
 
-                            // loop over the available pins on port B
-                            for (Pin pin : MCP23S17Pin.ALL_A_PINS) {
-                                int pinAddressA = pin.getAddress() - GPIO_A_OFFSET;
+                    // validate that there is at least one interrupt active on port A
+                    if (pinInterruptA > 0) {
+                        // read the current pin states on port A
+                        int pinInterruptState = provider.read(REGISTER_GPIO_A);
 
-                                // is there an interrupt flag on this pin?
-                                //if ((pinInterruptA & pinAddressA) > 0) {
-                                    // System.out.println("INTERRUPT ON PIN [" + pin.getName() + "]");
-                                    evaluatePinForChangeA(pin, pinInterruptState);
-                                //}
-                            }
+                        // loop over the available pins on port A
+                        for (Pin pin : MCP23017Pin.ALL_A_PINS) {
+                            PinState newState = (pinInterruptState & (pin.getAddress() - GPIO_A_OFFSET)) != 0
+                                    ? PinState.HIGH : PinState.LOW;
+
+                            // the setState method must call the listeners
+                            setState(pin, newState);
+                            // }
                         }
                     }
+                }
 
-                    // only process for interrupts if a pin on port B is configured as an input pin
-                    if (currentDirectionB > 0) {
-                        // process interrupts for port B
-                        int pinInterruptB = provider.read(REGISTER_INTF_B);
+                // only process for interrupts if a pin on port B is configured as an input pin
+                if (currentDirectionB > 0) {
+                    // process interrupts for port B
+                    int pinInterruptB = provider.read(REGISTER_INTF_B);
 
-                        // validate that there is at least one interrupt active on port B
-                        if (pinInterruptB > 0) {
+                    // validate that there is at least one interrupt active on port B
+                    if (pinInterruptB > 0) {
 
-                            // read the current pin states on port B
-                            int pinInterruptState = provider.read(REGISTER_GPIO_B);
+                        // read the current pin states on port B
+                        int pinInterruptState = provider.read(REGISTER_GPIO_B);
 
-                            // loop over the available pins on port B
-                            for (Pin pin : MCP23S17Pin.ALL_B_PINS) {
-                                int pinAddressB = pin.getAddress() - GPIO_B_OFFSET;
+                        // loop over the available pins on port B
+                        for (Pin pin : MCP23017Pin.ALL_A_PINS) {
+                            PinState newState = (pinInterruptState & (pin.getAddress() - GPIO_B_OFFSET)) != 0
+                                    ? PinState.HIGH : PinState.LOW;
 
-                                // is there an interrupt flag on this pin?
-                                //if ((pinInterruptB & pinAddressB) > 0) {
-                                    //System.out.println("INTERRUPT ON PIN [" + pin.getName() + "]");
-                                    evaluatePinForChangeB(pin, pinInterruptState);
-                                //}
-                            }
+                            // the setState method must call the listeners
+                            setState(pin, newState);
+
                         }
                     }
-
-                    // ... lets take a short breather ...
-                    Thread.currentThread();
-                    Thread.sleep(50);
-                } catch (Exception ex) {
-                    ex.printStackTrace();
                 }
+
+            } catch (Exception ex) {
+                ex.printStackTrace();
             }
         }
+    }
 
-        private void evaluatePinForChangeA(Pin pin, int state) {
-            if (getPinCache(pin).isExported()) {
-                // determine pin address
-                int pinAddress = pin.getAddress() - GPIO_A_OFFSET;
+    @Override
+    protected ExtensionMonitor createMonitor(ScheduledExecutorService scheduledExecutorService, int interval,
+            MonitorIntervalType intervalType) {
 
-                if ((state & pinAddress) != (currentStatesA & pinAddress)) {
-                    PinState newState = (state & pinAddress) == pinAddress ? PinState.HIGH
-                            : PinState.LOW;
-
-                    // cache state
-                    getPinCache(pin).setState(newState);
-
-                    // determine and cache state value for pin bit
-                    if (newState.isHigh()) {
-                        currentStatesA |= pinAddress;
-                    } else {
-                        currentStatesA &= ~pinAddress;
-                    }
-
-                    // change detected for INPUT PIN
-                    // System.out.println("<<< CHANGE >>> " + pin.getName() + " : " + state);
-                    dispatchPinChangeEvent(pin.getAddress(), newState);
-                }
-            }
-        }
-
-        private void evaluatePinForChangeB(Pin pin, int state) {
-            if (getPinCache(pin).isExported()) {
-                // determine pin address
-                int pinAddress = pin.getAddress() - GPIO_B_OFFSET;
-
-                if ((state & pinAddress) != (currentStatesB & pinAddress)) {
-                    PinState newState = (state & pinAddress) == pinAddress ? PinState.HIGH
-                            : PinState.LOW;
-
-                    // cache state
-                    getPinCache(pin).setState(newState);
-
-                    // determine and cache state value for pin bit
-                    if (newState.isHigh()) {
-                        currentStatesB |= pinAddress;
-                    } else {
-                        currentStatesB &= ~pinAddress;
-                    }
-
-                    // change detected for INPUT PIN
-                    // System.out.println("<<< CHANGE >>> " + pin.getName() + " : " + state);
-                    dispatchPinChangeEvent(pin.getAddress(), newState);
-                }
-            }
-        }
-
-        private void dispatchPinChangeEvent(int pinAddress, PinState state) {
-            // iterate over the pin listeners map
-            for (Pin pin : listeners.keySet()) {
-                // System.out.println("<<< DISPATCH >>> " + pin.getName() + " : " +
-                // state.getName());
-
-                // dispatch this event to the listener
-                // if a matching pin address is found
-                if (pin.getAddress() == pinAddress) {
-                    // dispatch this event to all listener handlers
-                    for (PinListener listener : listeners.get(pin)) {
-                        listener.handlePinEvent(new PinDigitalStateChangeEvent(this, pin, state));
-                    }
-                }
-            }
-        }
+        return new GpioStateMonitor(this, scheduledExecutorService, interval, intervalType);
     }
 }

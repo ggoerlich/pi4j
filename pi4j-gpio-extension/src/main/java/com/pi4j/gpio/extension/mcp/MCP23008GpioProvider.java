@@ -3,7 +3,7 @@ package com.pi4j.gpio.extension.mcp;
 import java.io.IOException;
 import java.util.concurrent.ScheduledExecutorService;
 
-import com.pi4j.gpio.extension.ExtensionProviderBase;
+import com.pi4j.gpio.extension.base.ExtensionProviderBase;
 import com.pi4j.io.gpio.GpioProvider;
 import com.pi4j.io.gpio.GpioProviderPinCache;
 import com.pi4j.io.gpio.Pin;
@@ -87,39 +87,14 @@ public class MCP23008GpioProvider extends ExtensionProviderBase implements GpioP
     private I2CDevice device;
 
     public MCP23008GpioProvider(int busNumber, int address) throws UnsupportedBusNumberException, IOException {
-        this(busNumber, address, null, 50, RefreshType.RefreshDelay);
-    }
-
-    /**
-     * @param busNumber Number of the I2C bus
-     * @param address 7 Bit device address
-     * @param executorService a instance of the a executor service to use
-     * @param refresh time in ms to refresh listener.
-     * @param refreshType define the type the the refresh time is used
-     * @throws UnsupportedBusNumberException
-     * @throws IOException
-     */
-
-    public MCP23008GpioProvider(int busNumber, int address, ScheduledExecutorService executorService, int refresh,
-            RefreshType refreshType) throws UnsupportedBusNumberException, IOException {
 
         // create I2C communications bus instanceScheduledExecutorService
-        this(I2CFactory.getInstance(busNumber), address, executorService, refresh, refreshType);
+        this(I2CFactory.getInstance(busNumber), address);
         i2cBusOwner = true;
 
     }
 
-    /**
-     * @param busNumber I2C bus instance to use
-     * @param address 7 Bit device address
-     * @param executorService a instance of the a executor service to use
-     * @param refresh time in ms to refresh listener
-     * @param refreshType define the type the the refresh time is used
-     * @throws UnsupportedBusNumberException
-     * @throws IOException
-     */
-    public MCP23008GpioProvider(I2CBus bus, int address, ScheduledExecutorService executorService, int refreshDelay,
-            RefreshType refreshType) throws IOException {
+    public MCP23008GpioProvider(I2CBus bus, int address) throws IOException {
         super();
 
         // set reference to I2C communications bus instance
@@ -150,7 +125,7 @@ public class MCP23008GpioProvider extends ExtensionProviderBase implements GpioP
         device.write(REGISTER_GPPU, (byte) currentPullup);
 
         // create and set the monitor
-        setMonitior(new StateMonitor(device, executorService, refreshDelay, refreshType));
+        enableMonitor();
     }
 
     @Override
@@ -304,18 +279,18 @@ public class MCP23008GpioProvider extends ExtensionProviderBase implements GpioP
     }
 
     /**
-     * This class/thread is used to to actively monitor for GPIO interrupts
+     * This class is used to to actively monitor for GPIO interrupts
      *
      * @author Robert Savage
      * @author Günter Goerlich
      *
      */
-    private class StateMonitor extends GpioStateMonitor {
+    private class StateMonitor extends ExtensionMonitor {
         private I2CDevice device;
 
-        public StateMonitor(I2CDevice device, ScheduledExecutorService executorService, int refreshDelay,
-                RefreshType refreshType) {
-            super(executorService, refreshDelay, refreshType);
+        public StateMonitor(I2CDevice device, ScheduledExecutorService executorService, int interval,
+                MonitorIntervalType intervalType) {
+            super(executorService, interval, intervalType);
             this.device = device;
         }
 
@@ -338,6 +313,7 @@ public class MCP23008GpioProvider extends ExtensionProviderBase implements GpioP
                         // System.out.println("INTERRUPT ON PIN [" + pin.getName() + "]");
                         PinState newState = (state & pin.getAddress()) != 0 ? PinState.HIGH : PinState.LOW;
 
+                        // the setState method must call the listeners
                         setState(pin, newState);
 
                     }
@@ -348,5 +324,12 @@ public class MCP23008GpioProvider extends ExtensionProviderBase implements GpioP
             }
 
         }
+    }
+
+    @Override
+    protected ExtensionMonitor createMonitor(ScheduledExecutorService scheduledExecutorService, int interval,
+            MonitorIntervalType intervalType) {
+
+        return new StateMonitor(device, scheduledExecutorService, interval, intervalType);
     }
 }
